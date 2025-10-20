@@ -1,0 +1,322 @@
+---
+title: "Real data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Processing data
+```{r}
+library(tensorTS)
+load("oecd_107x14x10_swp.RData")
+data = oecd_107x14x10_swp
+for (i in 1:14) {
+  for (j in 1:10) {
+    data[, i, j] <- data[, i, j] - mean(data[, i, j])
+  }
+}
+
+for (i in 1:10) {
+  data[, , i] <- data[, , i] / sd(as.vector(data[, , i]))
+}
+t=dim(data)[1]
+Y = list()
+for(i in 1:t) Y[[i]] = data[i,,]
+```
+
+### RF for ranks
+```{r}
+set.seed(132)
+
+# RF for r
+valsize = 16
+errors=matrix(nrow=8,ncol=8)
+for(r1 in 1:6)
+  for(r2 in 1:6){
+    print(c(r1,r2))
+    est.real.oMAR = tenAR.est(data[1:(t-valsize),,])
+    ini.real.RR = initialRPD_RRMAR(est.real.oMAR$A[[1]][[1]][[1]],
+                                       est.real.oMAR$A[[1]][[1]][[2]],r1,r2)
+    est.real.RR = GD_estimate(Y[[1]],Y[2:(t-valsize)],ini.real.RR,r1,0,r2,0,
+                                  eta=0.001,r_limit=0.1,it_lmt = 1000,display = T)
+    pred = est.real.RR$A1.hat%*%data[t-valsize,,]%*%t(est.real.RR$A2.hat)
+    e = norm(pred-data[t-valsize+1,,],type="F")^2
+    for(i in 1:(valsize-1)){
+      ini = initialRPD_RRMAR(est.real.RR$A1.hat,est.real.RR$A2.hat,r1,r2)
+      est.real.RR = GD_estimate(Y[[i+1]],Y[(i+2):(t-valsize+i)],ini,r1,0,r2,0,
+                                eta=0.001,r_limit=0.1,it_lmt = 1000,display = T)
+      pred = est.real.RR$A1.hat%*%data[t-valsize+i,,]%*%t(est.real.RR$A2.hat)
+      e = e + norm(pred-data[t-valsize+i+1,,],type="F")^2
+    }
+    errors[r1,r2] = e
+  }
+```
+
+
+### Selecting d
+```{r}
+r1_RF = 4
+r2_RF = 5
+# train a RRMAR with selected r
+est.real.oMAR = tenAR.est(data)
+ini.real.RR = initialRPD_RRMAR(est.real.oMAR$A[[1]][[1]][[1]],
+                               est.real.oMAR$A[[1]][[1]][[2]],r1_RF,r2_RF)
+est.real.RR = GD_estimate(Y[[1]],Y[2:t],ini.real.RR,r1_RF,0,r2_RF,0,
+                          eta=0.0001,r_limit=0.01,it_lmt = 10000,display = T)
+# BIC for d
+common.dim <- MAR_commondim_selection(Y[[1]],Y[2:t],r1_RF,r2_RF,est.real.RR,display=T,
+                                      eta=0.0001,r_limit=0.01,it_lmt = 5000,change_BICit=T)
+plot(est.real.RR$loss_history)
+d1s = common.dim[1]
+d2s = common.dim[2]
+d1s = 3
+d2s = 2
+ini.final <- initialCRPD_decompose(est.real.RR$A1.hat,est.real.RR$A2.hat,r1_RF,d1s,r2_RF,d2s)
+est.final <- GD_estimate(Y[[1]],Y[2:t],ini.final,r1_RF,d1s,r2_RF,d2s,
+                         eta=0.0001,r_limit=0.001,it_lmt = 10000,display = T)
+plot(est.final$loss_history)
+```
+
+
+### Model comparasion via RF
+```{r}
+
+r1_RF = 4
+r2_RF = 5
+d1s = 3
+d2s = 2
+valsize = 16
+errors_compare = matrix(nrow=valsize,ncol=6)
+colnames(errors_compare) = c("RR","CF","FM_TS","FM_r1r2","FM_d1d2","FM_88")
+
+
+for(i in 0:(valsize-1)){
+  print(i)
+  # hot initialization
+  if(i==0){
+    est.MAR = tenAR.est(data[(i+1):(t-valsize+i),,])
+    ini.r.RR = initialRPD_RRMAR(est.MAR$A[[1]][[1]][[1]],est.MAR$A[[1]][[1]][[2]],r1_RF,r2_RF)
+    est.r.RR = GD_estimate(Y[[i+1]],Y[(i+2):(t-valsize+i)],ini.r.RR,r1_RF,0,r2_RF,0,
+                            eta=0.001,r_limit=0.01,it_lmt = 5000,display = T)
+    ini.r.CF = initialCRPD_decompose(est.r.RR$A1.hat,est.r.RR$A2.hat,
+                                     r1_RF,d1s,r2_RF,d2s)
+  } else {
+    ini.r.RR = initialRPD_RRMAR(est.r.RR$A1.hat,est.r.RR$A2.hat,r1_RF,r2_RF)
+    ini.r.CF = initialCRPD_decompose(est.r.CF$A1.hat,est.r.CF$A2.hat,
+                                     r1_RF,d1s,r2_RF,d2s)
+  }
+  est.r.RR = GD_estimate(Y[[i+1]],Y[(i+2):(t-valsize+i)],ini.r.RR,r1_RF,0,r2_RF,0,
+                         eta=0.001,r_limit=0.01,it_lmt = 5000,display = T)
+  est.r.CF = GD_estimate(Y[[i+1]],Y[(i+2):(t-valsize+i)],ini.r.CF,r1_RF,d1s,r2_RF,d2s,
+                                eta=0.001,r_limit=0.01,it_lmt = 5000,display = T)
+  pred.RR = est.r.RR$A1.hat%*%data[t-valsize+i,,]%*%t(est.r.RR$A2.hat)
+  pred.CF = est.r.CF$A1.hat%*%data[t-valsize+i,,]%*%t(est.r.CF$A2.hat)
+      
+  # FM with estimated ranks
+  ranks.TS = tenFM.rank(data[(i+1):(t-valsize+i),,])$factor.num
+  est.r.FM1 = tenFM.est(data[(i+1):(t-valsize+i),,],ranks.TS)
+  # fit a MAR for factor process
+  Ft = est.r.FM1$Ft
+  est.factorAR = tenAR.est(Ft)
+  Ft.pred = est.factorAR$A[[1]][[1]][[1]]%*%Ft[dim(Ft)[1],,]%*%t(est.factorAR$A[[1]][[1]][[2]])
+  pred.FM1 = est.r.FM1$Q[[1]]%*%Ft.pred%*%t(est.r.FM1$Q[[2]])
+      
+  # FM with our selected ranks
+  est.r.FM2 = tenFM.est(data[(i+1):(t-valsize+i),,],c(r1_RF,r2_RF))
+  # fit a MAR for factor process
+  Ft = est.r.FM2$Ft
+  est.factorAR = tenAR.est(Ft)
+  Ft.pred = est.factorAR$A[[1]][[1]][[1]]%*%Ft[dim(Ft)[1],,]%*%t(est.factorAR$A[[1]][[1]][[2]])
+  pred.FM2 = est.r.FM2$Q[[1]]%*%Ft.pred%*%t(est.r.FM2$Q[[2]])
+  
+    
+  # FM with our selected d
+  est.r.FM3 = tenFM.est(data[(i+1):(t-valsize+i),,],c(d1s,d2s))
+  # fit a MAR for factor process
+  Ft = est.r.FM3$Ft
+  est.factorAR = tenAR.est(Ft)
+  Ft.pred = est.factorAR$A[[1]][[1]][[1]]%*%Ft[dim(Ft)[1],,]%*%t(est.factorAR$A[[1]][[1]][[2]])
+  pred.FM3 = est.r.FM3$Q[[1]]%*%Ft.pred%*%t(est.r.FM3$Q[[2]])
+  
+  # FM with 8,8
+  est.r.FM4 = tenFM.est(data[(i+1):(t-valsize+i),,],c(8,8))
+  # fit a MAR for factor process
+  Ft = est.r.FM4$Ft
+  est.factorAR = tenAR.est(Ft)
+  Ft.pred = est.factorAR$A[[1]][[1]][[1]]%*%Ft[dim(Ft)[1],,]%*%t(est.factorAR$A[[1]][[1]][[2]])
+  pred.FM4 = est.r.FM4$Q[[1]]%*%Ft.pred%*%t(est.r.FM4$Q[[2]])
+      
+  # errors
+  true_val = data[t-valsize+i+1,,]
+  errors_compare[i+1,1] = norm(pred.RR-true_val,type="F")^2
+  errors_compare[i+1,2] = norm(pred.CF-true_val,type="F")^2
+  errors_compare[i+1,3] = norm(pred.FM1-true_val,type="F")^2
+  errors_compare[i+1,4] = norm(pred.FM2-true_val,type="F")^2
+  errors_compare[i+1,5] = norm(pred.FM3-true_val,type="F")^2
+  errors_compare[i+1,6] = norm(pred.FM4-true_val,type="F")^2
+}
+apply(errors_compare[-16,],2,median)
+apply(errors_compare[-16,],2,mean)
+
+
+
+```
+
+
+
+### Result
+```{r}
+library(ggplot2)
+library(reshape2)
+el = melt(errors_compare[,1:4])
+ggplot(el,aes(x=Var2,y=value,fill=Var2)) + geom_boxplot() + theme_minimal() + 
+  coord_cartesian(ylim = c(0, 150)) + labs(x="Model",y="Forecast error") + 
+  scale_x_discrete(labels = c("RRMAR", "MARCF", "DMF(1,1)","DMF(4,5)"))+
+  theme(legend.position = "none")
+```
+
+
+```{r}
+library(Matrix)
+row_names = rownames(data[1,,])
+col_names = c("CPIF","CPIE","CPIT","TRLT","IR3","PTEC","PTM","GDP","ITEX","ITIM")
+
+
+
+# transform to orthonormal
+QR.1L = qr(cbind(est.final$C1.hat,est.final$R1.hat))
+QR.1R = qr(cbind(est.final$C1.hat,est.final$P1.hat))
+QR.2L = qr(cbind(est.final$C2.hat,est.final$R2.hat))
+QR.2R = qr(cbind(est.final$C2.hat,est.final$P2.hat))
+
+C1 = qr.Q(QR.1L)[,1:d1s,drop=F]
+R1 = qr.Q(QR.1L)[,(d1s+1):r1_RF,drop=F]
+P1 = qr.Q(QR.1R)[,(d1s+1):r1_RF,drop=F]
+D1 = qr.R(QR.1L)%*%est.final$D1.hat%*%t(qr.R(QR.1R))
+rownames(D1) <- NULL
+colnames(D1) <- NULL
+
+C2 = qr.Q(QR.2L)[,1:d2s,drop=F]
+R2 = qr.Q(QR.2L)[,(d2s+1):r2_RF,drop=F]
+P2 = qr.Q(QR.2R)[,(d2s+1):r2_RF,drop=F]
+D2 = qr.R(QR.2L)%*%est.final$D2.hat%*%t(qr.R(QR.2R))
+rownames(D2) <- NULL
+colnames(D2) <- NULL
+
+rownames(C1) = row_names
+rownames(R1) = row_names
+rownames(P1) = row_names
+rownames(C2) = col_names
+rownames(R2) = col_names
+rownames(P2) = col_names
+
+# varimax
+vC1 = varimax(C1)
+#vR1 = varimax(R1)
+#vP1 = varimax(P1)
+vC2 = varimax(C2)
+vR2 = varimax(R2)
+vP2 = varimax(P2)
+C1 = vC1$loadings
+C2 = vC2$loadings
+R2 = vR2$loadings
+P2 = vP2$loadings
+D1 = bdiag(t(vC1$rotmat),diag(1))%*%D1%*%bdiag(vC1$rotmat,diag(1))
+D2 = bdiag(t(vC2$rotmat),t(vR2$rotmat))%*%D2%*%bdiag(vC2$rotmat,vP2$rotmat)
+
+# adjusting color of heatmap
+mat_list = list(C1%*%t(C1),P1%*%t(P1),C1%*%t(C1)+P1%*%t(P1),R1%*%t(R1),C1%*%t(C1)+R1%*%t(R1))
+global_min <- min(sapply(mat_list, min))
+global_max <- max(sapply(mat_list, max))
+abs_max <- max(abs(global_max),abs(global_min))
+color_neg <- colorRampPalette(c("blue", "white"))(50)
+color_pos <- colorRampPalette(c("white", "red"))(50)
+colors <- c(color_neg, color_pos)
+breaks_neg <- seq(-abs_max, 0, length.out = 51)
+breaks_pos <- seq(0, abs_max, length.out = 51)
+breaks <- c(breaks_neg, breaks_pos[-1]) 
+
+ 
+
+library(pheatmap)
+
+row_arrange = c("AUS","GBR","USA","DEU","NLD","IRL","FIN","SWE","FRA","CAN","NZL","NOR","DNK","AUT")
+
+C1 = C1[row_arrange,,drop=F]
+R1 = R1[row_arrange,,drop=F]
+P1 = P1[row_arrange,,drop=F]
+
+pdf("C1.pdf", width = 6.15, height = 5.65, paper = "special")
+pheatmap(C1%*%t(C1), cluster_rows = F,cluster_cols = F,cellwidth = 26,cellheight = 26,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("P1.pdf", width = 6.15, height = 5.65, paper = "special")
+pheatmap(P1%*%t(P1), cluster_rows = F,cluster_cols = F,cellwidth = 26,cellheight = 26,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("C1_P1.pdf", width = 6.15, height = 5.65, paper = "special")
+pheatmap(C1%*%t(C1)+P1%*%t(P1), cluster_rows = F,cluster_cols = F,cellwidth = 26,cellheight = 26,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("R1.pdf", width = 6.15, height = 5.65, paper = "special")
+pheatmap(R1%*%t(R1), cluster_rows = F,cluster_cols = F,cellwidth = 26,cellheight = 26,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("C1_R1.pdf", width = 6.15, height = 5.65, paper = "special")
+pheatmap(C1%*%t(C1)+R1%*%t(R1), cluster_rows = F,cluster_cols = F,cellwidth = 26,cellheight = 26, 
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+```
+
+
+
+```{r}
+
+# adjusting color of heatmap
+mat_list = list(C2%*%t(C2),P2%*%t(P2),C2%*%t(C2)+P2%*%t(P2),R2%*%t(R2),C2%*%t(C2)+R2%*%t(R2))
+global_min <- min(sapply(mat_list, min))
+global_max <- max(sapply(mat_list, max))
+abs_max <- max(abs(global_max),abs(global_min))
+color_neg <- colorRampPalette(c("blue", "white"))(50)
+color_pos <- colorRampPalette(c("white", "red"))(50)
+colors <- c(color_neg, color_pos)
+breaks_neg <- seq(-abs_max, 0, length.out = 51)
+breaks_pos <- seq(0, abs_max, length.out = 51)
+breaks <- c(breaks_neg, breaks_pos[-1]) 
+
+
+col_arrange = c("AUS","GBR","USA","DEU","NLD","IRL","FIN","SWE","FRA","CAN","NZL","NOR","DNK","AUT")
+
+pdf("C2.pdf", width = 6.3, height = 5.75, paper = "special")
+pheatmap(C2%*%t(C2), cluster_rows = F,cluster_cols = F,cellwidth = 37,cellheight = 37,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("P2.pdf", width = 6.3, height = 5.75, paper = "special")
+pheatmap(P2%*%t(P2), cluster_rows = F,cluster_cols = F,cellwidth = 37,cellheight = 37,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("C2_P2.pdf", width = 6.3, height = 5.75, paper = "special")
+pheatmap(C2%*%t(C2)+P2%*%t(P2), cluster_rows = F,cluster_cols = F,cellwidth = 37,cellheight = 37,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("R2.pdf", width = 6.3, height = 5.75, paper = "special")
+pheatmap(R2%*%t(R2), cluster_rows = F,cluster_cols = F,cellwidth = 37,cellheight = 37,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+
+pdf("C2_R2.pdf", width = 6.3, height = 5.75, paper = "special")
+pheatmap(C2%*%t(C2)+R2%*%t(R2), cluster_rows = F,cluster_cols = F,cellwidth = 37,cellheight = 37,
+         color = colors, breaks = breaks, fontsize_row = 13, fontsize_col = 13)
+dev.off()
+```

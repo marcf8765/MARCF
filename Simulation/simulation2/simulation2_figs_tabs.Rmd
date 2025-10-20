@@ -1,0 +1,169 @@
+---
+title: "Figures and tables in Simulation 2"
+output: pdf_document
+---
+
+```{r}
+rm(list = ls())
+file_list <- list.files(path = getwd(), pattern = "*.csv", full.names = TRUE)
+data_list <- lapply(file_list, read.csv)
+file_list <- basename(file_list)
+file_list
+```
+
+# Accuracy computation
+
+```{r}
+ac <- matrix(0, nrow = 4, ncol = 4)
+for (i in 1:4) {
+  for (j in 1:4) {
+    ac[i, j] <- sum(data_list[[4 * (i - 1) + j]][, c("correct")]) / 500
+  }
+}
+ac
+```
+
+
+# Visialization
+
+## A1
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(latex2exp)
+list_data <- lapply(1:32, function(x) rnorm(sample(80:100, 1)))
+
+for (i in 1:16) {
+  list_data[[2 * i - 1]] <- data_list[[i]][data_list[[i]][, c("correct")] == 1, c("L1_TStrue")]
+  list_data[[2 * i]] <- data_list[[i]][data_list[[i]][, c("correct")] == 1, c("L1_MARwCF")]
+}
+
+
+names(list_data) <- paste0("V", 1:32)
+
+df_long <- map_df(list_data, ~data.frame(value = .x), .id = "variable") %>%
+  mutate(
+    group = ceiling(as.numeric(gsub("V", "", variable)) / 2),  # 每两列为一组
+    within_group = ifelse(as.numeric(gsub("V", "", variable)) %% 2 == 0, 2, 1)
+  )
+
+
+df_long <- df_long %>%
+  mutate(
+    r1 = (group - 1) %/% 4 + 1,
+    r2 = (group - 1) %% 4 + 1,
+    log_value = log(value)
+  )
+
+
+y_limits_data <- df_long %>%
+  group_by(variable) %>%
+  summarise(
+    stats = list(boxplot.stats(log_value)$stats)
+  )
+y_min <- min(sapply(y_limits_data$stats, `[`, 1))
+y_max <- max(sapply(y_limits_data$stats, `[`, 5))
+
+
+facet_plot <- ggplot(df_long, aes(x = as.factor(within_group), y = log_value, fill = as.factor(within_group))) +
+  geom_boxplot(width = 0.5, linewidth = 0.25, fatten = 1.5, outlier.shape = NA) +
+  facet_grid(rows = vars(r1), cols = vars(r2), switch = "x") +
+  scale_y_continuous(
+    name = expression(paste("Log estimation error of ", bold(Lambda[1]))), 
+    limits = c(y_min, y_max),
+    sec.axis = sec_axis(trans = ~., name = expression(r[1]),
+                        breaks = NULL,
+                        labels = NULL)
+  ) +
+  labs(x = expression(r[2]),size = 10) +
+  scale_fill_manual(values = c("#56B4E9", "#E69F00"), labels = c("DMF Model", "MARCF Model")) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 8),
+    strip.text.y = element_text(face = "bold"),
+    strip.text.x = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA),
+    panel.spacing = unit(0.2, "lines")
+  )
+
+
+
+facet_plot
+
+ggsave("DMFM_800_A1_v2.pdf", plot = facet_plot, width = 6, height = 8, units = "in")
+```
+
+## A2
+
+```{r}
+list_data <- lapply(1:32, function(x) rnorm(sample(80:100, 1)))
+
+for (i in 1:16) {
+  list_data[[2 * i - 1]] <- data_list[[i]][data_list[[i]][, c("correct")] == 1, c("L2_TStrue")]
+  list_data[[2 * i]] <- data_list[[i]][data_list[[i]][, c("correct")] == 1, c("L2_MARwCF")]
+}
+
+
+names(list_data) <- paste0("V", 1:32)
+df_long <- map_df(list_data, ~data.frame(value = .x), .id = "variable") %>%
+  mutate(
+    group = ceiling(as.numeric(gsub("V", "", variable)) / 2),
+    within_group = ifelse(as.numeric(gsub("V", "", variable)) %% 2 == 0, 2, 1)
+  )
+
+
+df_long <- df_long %>%
+  mutate(
+    r1 = (group - 1) %/% 4 + 1,
+    r2 = (group - 1) %% 4 + 1,
+    log_value = log(value)
+  )
+
+
+y_limits_data <- df_long %>%
+  group_by(variable) %>% 
+  summarise(
+    stats = list(boxplot.stats(log_value)$stats)
+  )
+
+y_min <- min(sapply(y_limits_data$stats, `[`, 1))
+y_max <- max(sapply(y_limits_data$stats, `[`, 5))
+
+
+
+facet_plot <- ggplot(df_long, aes(x = as.factor(within_group), y = log_value, fill = as.factor(within_group))) +
+  geom_boxplot(width = 0.5, linewidth = 0.25, fatten = 1.5, outlier.shape = NA) +
+  facet_grid(rows = vars(r1), cols = vars(r2), switch = "x") +
+  scale_y_continuous(
+    name = expression(paste("Log estimation error of ", bold(Lambda[2]))),
+    limits = c(y_min, y_max),
+    sec.axis = sec_axis(trans = ~., name = expression(r[1]),
+                        breaks = NULL,
+                        labels = NULL)
+  ) +
+  labs(x = expression(r[2])) +
+  scale_fill_manual(values = c("#56B4E9", "#E69F00"), labels = c("DMF Model", "MARCF Model")) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 8),
+    strip.text.y = element_text(face = "bold"),
+    strip.text.x = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA),
+    panel.spacing = unit(0.2, "lines")
+  )
+
+
+facet_plot
+
+
+ggsave("DMFM_800_A2_v2.pdf", plot = facet_plot, width = 6, height = 8, units = "in")
+```

@@ -1,0 +1,90 @@
+---
+title: "Simulation_main"
+output: pdf_document
+---
+
+### Experiment 1: MARwCF DGP
+```{r}
+timestart <- Sys.time()
+library(parallel)
+# params
+p1 = 30
+p2 = 20
+r1s = 3
+r2s = 2
+t = 1000
+n = 500
+# parallel computing
+detectCores()
+cl <- makeCluster(7)
+clusterSetRNGStream(cl, 123)
+
+for(d1s in 0:r1s)
+  for(d2s in 0:r2s){
+    clusterExport(cl, varlist = ls())
+    cat("d1 and d2 = ", d1s, d2s, "\n")
+    time_1 <- Sys.time()
+    result_list <- parLapply(cl, 1:n, function(x) simulation1_once(p1,r1s,d1s,p2,r2s,d2s,t))
+    print(Sys.time() - time_1)
+    result_df <- t(data.frame(result_list))
+    row.names(result_df) <- NULL
+    filename <- paste("MARwCF",p1,r1s,d1s,p2,r2s,d2s,t,"seed123",sep="_")
+    write.csv(result_df,paste0(filename,".csv"))
+  }
+
+# Setting 2
+p1 = 20
+p2 = 10
+r1s = 3
+r2s = 2
+t = 500
+
+clusterSetRNGStream(cl, 122)
+
+for(d1s in 0:r1s)
+  for(d2s in 0:r2s){
+    print(c(d1s,d2s))
+    clusterExport(cl, varlist = ls())
+    time_2 <- Sys.time()
+    result_list <- parLapply(cl, 1:n, function(x) simulation1_once(p1,r1s,d1s,p2,r2s,d2s,t))
+    print(Sys.time() - time_2)
+    result_df <- t(data.frame(result_list))
+    row.names(result_df) <- NULL
+    filename <- paste("MARwCF",p1,r1s,d1s,p2,r2s,d2s,t,"seed122",sep="_")
+    write.csv(result_df,paste0(filename,".csv"))
+  }
+
+stopCluster(cl)
+print("Total:")
+print(Sys.time() - timestart)
+```
+
+
+
+### Experiment 2: DMFM DGP
+```{r}
+library(parallel)
+# params
+p1 = 16
+p2 = 16
+t = 800
+n = 500
+
+detectCores()
+cl <- makeCluster(7)
+clusterSetRNGStream(cl, 125)
+  for(r1s in 1:4)
+  for(r2s in 1:4){
+    print(c(r1s,r2s,t))
+    clusterExport(cl, varlist = ls())
+    time_3 <- system.time(result_list <- parLapply(cl, 1:n, function(x) 
+      simulation2_once(p1,r1s,p2,r2s,t)))
+    print(time_3)
+    result_df <- t(data.frame(result_list))
+    row.names(result_df) <- NULL
+    filename <- paste("DMFM",p1,r1s,p2,r2s,t,"seed125","r2",sep="_")
+    write.csv(result_df,paste0(filename,".csv"))
+}
+
+stopCluster(cl)
+```
