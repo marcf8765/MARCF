@@ -1,0 +1,934 @@
+---
+title: "Function used in simulation and real data of MARCF"
+output: html_document
+---
+
+### Data Generation
+
+#### DGP1: MARwCF
+
+```{r}
+generation_MARwCF <- function(p1, r1, d1, p2, r2, d2, t){
+  # Setting the true values for A1 and A2 (Simulated Data)
+  # A1
+  while (T) {
+    
+    S <- diag(r1)
+    
+    if (r1 != d1) { 
+      diag(S) <- (runif(r1, min = 0.9, max = 1.1))
+    } else {
+      diag(S) <- (runif(r1, min = 0.8, max = 1))
+    }
+    
+    C <- qr.Q(qr(matrix(rnorm(p1 * d1), nrow = p1)))
+    
+    s <- 0
+    
+    while (s < 0.8) {
+      R_random <- matrix(rnorm(p1 * (r1 - d1)), nrow = p1)
+      P_random <- matrix(rnorm(p1 * (r1 - d1)), nrow = p1)
+      
+      project_to_orthogonal <- function(mat, orth_basis) {
+        mat - orth_basis %*% t(orth_basis) %*% mat
+      }
+      
+      R <- project_to_orthogonal(R_random, C)
+      P <- project_to_orthogonal(P_random, C)
+      
+      R <- qr.Q(qr(R))
+      P <- qr.Q(qr(P))
+      
+      if (r1 != d1) {
+        s <- sin(acos(svd(t(R) %*% P)$d[1]))
+      } else {
+        break
+      }
+    }
+    
+    O1 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+    O1 <- qr.Q(qr(O1))
+    
+    O2 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+    O2 <- qr.Q(qr(O2))
+  
+    A1 <- cbind(C, R) %*% t(O1) %*% S %*% t(O2) %*% t(cbind(C, P))
+    
+    S <- diag(r2)
+    
+    if (r2 != d2) { 
+      diag(S) <- (runif(r2, min = 0.9, max = 1.1))
+    } else {
+      diag(S) <- (runif(r2, min = 0.8, max = 1))
+    }
+    
+    C <- qr.Q(qr(matrix(rnorm(p2 * d2), nrow = p2)))
+    
+    s <- 0
+    
+    while (s < 0.8) {      
+      R_random <- matrix(rnorm(p2 * (r2 - d2)), nrow = p2)
+      P_random <- matrix(rnorm(p2 * (r2 - d2)), nrow = p2)
+      
+      project_to_orthogonal <- function(mat, orth_basis) {
+        mat - orth_basis %*% t(orth_basis) %*% mat
+      }
+      
+      R <- project_to_orthogonal(R_random, C)
+      P <- project_to_orthogonal(P_random, C)
+      
+      R <- qr.Q(qr(R))
+      P <- qr.Q(qr(P))
+      
+      if (r2 != d2) {
+        s <- sin(acos(svd(t(R) %*% P)$d[1]))
+      } else {
+        break
+      }
+    }
+    
+    O1 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+    O1 <- qr.Q(qr(O1))
+    
+    O2 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+    O2 <- qr.Q(qr(O2))
+    
+    A2 <- cbind(C, R) %*% t(O1) %*% S %*% t(O2) %*% t(cbind(C, P))
+    if (abs(eigen(A2)$values[which.max(abs(eigen(A2)$values))] * eigen(A1)$values[which.max(abs(eigen(A1)$values))]) < 1) {
+      break
+    }
+  }
+  k <- (sum(A1^2)/sum(A2^2))^(1/4)
+  A1 <- A1/k
+  A2 <- A2*k
+  
+  # generate Yt data, t is from 0 to T
+  # First generate some initial stage data with a length set to 20, which can be understood as the loop variable ranging from -20 to -1.
+  # The initial values of Yt are a random multivariate standard normal matrix of dimensions p1 * p2.
+    Y0 <- matrix(rnorm(p1*p2), nrow = p1, ncol = p2)
+    for(i in 1:20)
+      Y0 <- A1 %*% Y0 %*% t(A2) + matrix(rnorm(p1*p2), nrow = p1, ncol = p2)
+    Y <- list()
+    Y[[1]] <- A1 %*% Y0 %*% t(A2) + matrix(rnorm(p1*p2), nrow = p1, ncol = p2)
+    for(i in 2:t)
+      Y[[i]] <- A1 %*% Y[[i-1]] %*% t(A2) + matrix(rnorm(p1*p2), nrow = p1, ncol = p2)
+    
+    return(list("Y0"=Y0, "Y"=Y, "A1.star"=A1,  "A2.star"=A2,
+                "params"=c("p1"=p1,"r1"=r1,"d1"=d1,"p2"=p2,"r2"=r2,"d2"=d2)))
+}
+```
+
+#### DGP2: DMFM
+
+```{R}
+generation_DMFM1 <- function(p1, r1, p2, r2, t, Sigma){
+  library(MASS)
+  while (T) {
+    # In this case, A1 = Λ1 * B1 * Λ1', A2 = Λ2 * B2 * Λ2'
+    # A1
+    S1 <- diag(r1)
+    diag(S1) <- (runif(r1, min = 0.8, max = 1))
+    
+    m <- matrix(runif(p1 * r1), nrow = p1)
+    Lambda1 <- qr.Q(qr(m))
+
+    O_1 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+    O_1 <- qr.Q(qr(O_1))
+    O_2 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+    O_2 <- qr.Q(qr(O_2))
+    B1 <- t(O_1) %*% S1 %*% t(O_2)
+    
+    A1 <- Lambda1 %*% B1 %*% t(Lambda1)
+    
+    # A2
+    S2 <- diag(r2)
+    diag(S2) <- (runif(r2, min = 0.8, max = 1))
+    
+    m <- matrix(runif(p2 * r2), nrow = p2)
+    Lambda2 <- qr.Q(qr(m))
+    
+    O_1 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+    O_1 <- qr.Q(qr(O_1))
+    O_2 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+    O_2 <- qr.Q(qr(O_2))
+    B2 <- t(O_1) %*% S2 %*% t(O_2)
+    
+    A2 <- Lambda2 %*% B2 %*% t(Lambda2)
+    
+    if (abs(eigen(A2)$values[which.max(abs(eigen(A2)$values))] * eigen(A1)$values[which.max(abs(eigen(A1)$values))]) < 1) {
+      break
+    }
+  }
+  k <- (sum(A1^2)/sum(A2^2))^(1/4)
+  A1 <- A1/k
+  A2 <- A2*k
+  
+  # Generate Xt data, t is from 0 to T
+  # First generate some initial stage data with a length set to 20, which can be understood as the loop variable ranging from -20 to -1. The initial values of Ft are a random multivariate standard normal matrix of dimensions r1 * r2.
+  
+  white_noise_full <- mvrnorm(t+21,mu=rep(0,p1*p2), Sigma=Sigma)
+  E <- list()
+  for (i in seq_len(t + 1)) {
+    E[[i]] <- matrix(white_noise_full[i,], nrow = p1, ncol = p2)
+  }
+
+  # X    
+  X0 <- matrix(rnorm(r1 * r2), nrow = r1, ncol = r2)
+  
+  e2 <- list()
+  for (i in seq_len(20)) {
+    e2[[i]] <- matrix(white_noise_full[t+1+i,], nrow = p1, ncol = p2)
+  }
+  for (i in seq_len(20)) {
+    xi <- t(Lambda1) %*% e2[[i]] %*% Lambda2
+    X0 <- B1 %*% X0 %*% t(B2) + xi
+  }
+  
+  X_m <- list()
+  
+  xi <- t(Lambda1) %*% E[[1]] %*% Lambda2
+  X_m[[1]] <- B1 %*% X0 %*% t(B2) + xi
+  for (i in 2:t) {
+    xi <- t(Lambda1) %*% E[[i]] %*% Lambda2
+    X_m[[i]] <- B1 %*% X_m[[i-1]] %*% t(B2) + xi
+  }
+  
+  # Generate Yt data allowing contemporary correlations among Et's elements
+  
+  W <- e2[[20]] - Lambda1 %*% t(Lambda1) %*% e2[[20]] %*% Lambda2 %*% t(Lambda2)
+  
+  Y0 <- Lambda1 %*% X0 %*% t(Lambda2) + W
+  Y <- list()
+  
+  for (i in 1:t) {
+    W <- E[[i]] - Lambda1 %*% t(Lambda1) %*% E[[i]] %*% Lambda2 %*% t(Lambda2)
+    Y[[i]] <- Lambda1 %*% X_m[[i]] %*% t(Lambda2) + W
+  }
+  
+  # varification: a-b should be a zero matrix
+  # a = Y[[t]]-Lambda1%*%B1%*%t(Lambda1)%*%Y[[t-1]]%*%Lambda2%*%t(B2)%*%t(Lambda2)
+  # b = E[[t]]
+  # print(a-b)
+  #Y_array <- array(dim = c(t+1,p1,p2))
+  #Y_array[1,,] <- Y0
+  #for(i in 2:(t+1))
+  #  Y_array[i,,] <- Y[[i-1]]
+  return(list("Y0"=Y0, "Y"=Y, "A1.star"=A1, "A2.star"=A2, "L1.star"=Lambda1, "L2.star"=Lambda2))
+}
+
+
+generation_DMFM2 <- function(p1, r1, p2, r2, t, Sigma){
+  # two white noise are separated
+    library(MASS)
+    while (T) {
+      
+      # In this case, A1 = Λ1 * B1 * Λ1', A2 = Λ2 * B2 * Λ2'
+      # A1
+      S1 <- diag(r1)
+      diag(S1) <- (runif(r1, min = 0.8, max = 1))
+      
+      m <- matrix(runif(p1 * r1), nrow = p1)
+      Lambda1 <- qr.Q(qr(m))
+
+      O_1 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+      O_1 <- qr.Q(qr(O_1))
+      O_2 <- matrix(runif(r1 * r1), nrow = r1, ncol = r1)
+      O_2 <- qr.Q(qr(O_2))
+      B1 <- t(O_1) %*% S1 %*% t(O_2)
+      
+      A1 <- Lambda1 %*% B1 %*% t(Lambda1)
+      
+      # A2
+      S2 <- diag(r2)
+      diag(S2) <- (runif(r2, min = 0.8, max = 1))
+      
+      m <- matrix(runif(p2 * r2), nrow = p2)
+      Lambda2 <- qr.Q(qr(m))
+      
+      O_1 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+      O_1 <- qr.Q(qr(O_1))
+      O_2 <- matrix(runif(r2 * r2), nrow = r2, ncol = r2)
+      O_2 <- qr.Q(qr(O_2))
+      B2 <- t(O_1) %*% S2 %*% t(O_2)
+      
+      A2 <- Lambda2 %*% B2 %*% t(Lambda2)
+      
+      if (abs(eigen(A2)$values[which.max(abs(eigen(A2)$values))] * eigen(A1)$values[which.max(abs(eigen(A1)$values))]) < 1) {
+        break
+      }
+    }
+    
+    A1 <- A1
+    A2 <- A2
+
+    A1_original <- A1
+    A2_original <- A2
+
+  
+  # Generate Xt data, t is from 0 to T
+  # First generate some initial stage data with a length set to 20, which can be understood as the loop variable ranging from -20 to -1. The initial values of Ft are a random multivariate standard normal matrix of dimensions r1 * r2.
+  
+  # Generate white noise
+  # Random error term of Yt
+  white_noise_full <- mvrnorm(t+1,mu=rep(0,p1*p2), Sigma=Sigma)
+  xi_full <- mvrnorm(t+20,mu=rep(0,r1*r2),Sigma=diag(r1*r2))
+  xi <- list()
+  E <- list()
+  for (i in seq_len(t + 1)) {
+    e_i_full <- matrix(white_noise_full[i,], nrow = p1, ncol = p2)
+    E[[i]] <- e_i_full-Lambda1%*%t(Lambda1)%*%e_i_full%*%Lambda2%*%t(Lambda2)
+  }
+  for(i in 1:(t+20))    xi[[i]] <- matrix(xi_full[i,], nrow=r1,ncol=r2)
+
+  # truncate at 21 to obtain X0  
+  X0 <- matrix(rnorm(r1 * r2), nrow = r1, ncol = r2)
+  for (i in seq_len(20))   X0 <- B1 %*% X0 %*% t(B2) + xi[[i]]
+  
+  X_m <- list()
+  X_m[[1]] <- B1 %*% X0 %*% t(B2) + xi[[21]]
+  for (i in 2:t) {
+    X_m[[i]] <- B1 %*% X_m[[i-1]] %*% t(B2) + xi[[20+i]]
+  }
+  
+  # Generate Yt data allowing contemporary correlations among Et's elements
+  Y0 <- Lambda1 %*% X0 %*% t(Lambda2) + E[[1]]
+  Y <- list()
+  
+  for (i in 1:t)    Y[[i]] <- Lambda1 %*% X_m[[i]] %*% t(Lambda2) + E[[i+1]]
+  
+  # varification: a-b should be a zero matrix
+  # a = Y[[t]]-Lambda1%*%B1%*%t(Lambda1)%*%Y[[t-1]]%*%Lambda2%*%t(B2)%*%t(Lambda2)
+  # b = E[[t]]
+  # print(a-b)
+  return(list("Y0"=Y0, "Y"=Y, "A1.star"=A1_original, "A2.star"=A2_original, "L1.star"=Lambda1, "L2.star"=Lambda2))
+}
+```
+
+### Estimation Procedure
+
+#### First-stage Initialization
+
+```{R}
+initial1_ordinaryMAR <- function(Y, Y0, p1=nrow(Y0), p2=ncol(Y0), t=length(Y)){
+  # First-stage initialization of A1 and A2
+  # Projection method of estimating MAR
+  # Reference: Autoregressive models for matrix-valued time series. Rong Chen, Han Xiao, and Dan Yang
+    y0 <- c(Y0)
+    y <- list()
+    for (i in seq_along(Y)) {
+      y[[i]] <- c(Y[[i]])
+    }
+  
+    X_v <- matrix(y0, ncol = 1)
+    for (i in 1:t) {
+      X_v <- cbind(X_v, y[[i]])
+    }
+    Y_v <- X_v[, 2:(t+1)]
+    X_v <- X_v[, 1:t]
+    f_hat <- Y_v %*% t(X_v) %*% solve(X_v %*% t(X_v))
+  
+    p <- p1 *p2
+    f_tuta <- matrix(c(f_hat[1:p1, 1:p1]), ncol = 1)
+    
+    for (i in (2:p2^2)) {
+      r_h <- (i - 1) %% p2 * p1 + 1
+      c_h <- (i - 1) %/% p2 * p1 + 1
+      r_t <- r_h + p1 - 1
+      c_t <- c_h + p1 - 1
+      f_tuta <- cbind(f_tuta, c(f_hat[r_h:r_t, c_h:c_t]))
+    }
+  
+    f_svd <- svd(f_tuta)
+    u1 <- f_svd$u[, 1]
+    v1 <- f_svd$v[, 1]
+    A1_hat_vec <- sqrt(f_svd$d[1]) * u1
+    A2_hat_vec <- sqrt(f_svd$d[1]) * v1
+    A1 <- matrix(A1_hat_vec, nrow = p1, ncol = p1)
+    A2 <- matrix(A2_hat_vec, nrow = p2, ncol = p2)
+    
+    A1_stage1 <- A1
+    A2_stage1 <- A2
+    return(list("A1.hat"=A1_stage1,"A2.hat"=A2_stage1))
+}
+```
+
+
+```{R}
+initialRPD_RRMAR <- function(A1,A2,r1,r2){
+  s1 <- svd(A1)
+  s2 <- svd(A2)
+  C1 <- matrix(nrow=nrow(A1),ncol=0)
+  R1 <- s1$u[,1:r1]
+  P1 <- s1$v[,1:r1]
+  D1 <- diag(s1$d)[1:r1,1:r1,drop = FALSE]
+  C2 <- matrix(nrow=nrow(A2),ncol=0)
+  R2 <- s2$u[,1:r2]
+  P2 <- s2$v[,1:r2]
+  D2 <- diag(s2$d)[1:r2,1:r2,drop = FALSE]
+  A1_stage2 <- R1%*%D1%*%t(P1)
+  A2_stage2 <- R2%*%D2%*%t(P2)
+  return(list("A1"=A1_stage2,"C1"=C1,"R1"=R1,"P1"=P1,"D1"=D1,
+              "A2"=A2_stage2,"C2"=C2,"R2"=R2,"P2"=P2,"D2"=D2))
+}
+
+```
+
+#### Final initialization: decompose to obtain CRPD
+
+```{R}
+initialCRPD_decompose <- function(A1, A2, r1, d1, r2, d2, p1=nrow(A1), p2=nrow(A2), b=1){
+    # A1
+    # step 1
+      svd_result <- svd(A1)
+      U <- svd_result$u[, 1:r1]
+      D <- diag(svd_result$d)[1:r1, 1:r1]
+      V <- svd_result$v[, 1:r1]
+    
+    # step 2
+      Ip <- diag(p1)
+      R <- svd(U %*% t(U) %*% (Ip - V %*% t(V)))$u[, seq_len(r1 - d1)]
+      P <- svd(V %*% t(V) %*% (Ip - U %*% t(U)))$u[, seq_len(r1 - d1)]
+    
+    # step 3
+      eigen_result_5 <- eigen((Ip - R %*% t(R)) %*% (Ip - P %*% t(P)) %*% (U %*% t(U) + V %*% t(V)) %*% (Ip - R %*% t(R)) %*% (Ip - P %*% t(P)))
+      C <- eigen_result_5$vectors[, seq_len(d1)]
+    
+    # step 4
+      D <- t(cbind(C, R)) %*% A1 %*% cbind(C, P)
+      
+      C1 <- b * C
+      R1 <- b * R
+      P1 <- b * P
+      D1 <- D / b^2
+      
+      A1_initial <- cbind(C, R) %*% D %*% t(cbind(C, P))
+      
+    # A2
+    # step 1
+      svd_result <- svd(A2)
+      U <- svd_result$u[, 1:r2]
+      D <- diag(svd_result$d)[1:r2, 1:r2]
+      V <- svd_result$v[, 1:r2]
+    
+    # step 2
+      Ip <- diag(p2)
+      R <- svd(U %*% t(U) %*% (Ip - V %*% t(V)))$u[, seq_len(r2 - d2)]
+      P <- svd(V %*% t(V) %*% (Ip - U %*% t(U)))$u[, seq_len(r2 - d2)]
+    
+    # step 3
+      eigen_result_5 <- eigen((Ip - R %*% t(R)) %*% (Ip - P %*% t(P)) %*% (U %*% t(U) + V %*% t(V)) %*% (Ip - R %*% t(R)) %*% (Ip - P %*% t(P)))
+      C <- eigen_result_5$vectors[, seq_len(d2)]
+    
+    # step 4
+      D <- t(cbind(C, R)) %*% A2 %*% cbind(C, P)
+      
+      C2 <- b * C
+      R2 <- b * R
+      P2 <- b * P
+      D2 <- D / b^2
+      
+      A2_initial <- cbind(C, R) %*% D %*% t(cbind(C, P))
+      result <- list("A1"=A1_initial,"C1"=C1,"R1"=R1,"P1"=P1,"D1"=D1,
+                     "A2"=A2_initial,"C2"=C2,"R2"=R2,"P2"=P2,"D2"=D2)
+}
+```
+
+#### Least Squares Estimation via Gradient Decent
+
+```{R}
+GD_algo <- function(Y0, Y, initials_list, r1, d1, r2, d2, eta, it_lmt, r_limit, phi=1, a=1, b=1, display=F, history=T, A1.star=NULL, A2.star=NULL){
+  # data=list("Y0"=Y0, "Y"=Y, "A1.star"=A1.star,  "A2.star"=A2.star))
+  # initials_list is a named list containing initial values of A1,C1,R1,P1,D1,A2,C2,R2,P2,D2, respectively.
+  ### Realization of our gradient decent algorithm when r and d are known.
+      cat("Begining of GD, optim.paras: ",c(eta,r_limit,it_lmt),"\n")
+      rate <- 100
+      co <- 0
+      A1 <- initials_list$A1
+      C1 <- initials_list$C1
+      R1 <- initials_list$R1
+      P1 <- initials_list$P1
+      D1 <- initials_list$D1
+      A2 <- initials_list$A2
+      C2 <- initials_list$C2
+      R2 <- initials_list$R2
+      P2 <- initials_list$P2
+      D2 <- initials_list$D2
+      if(history){
+        loss_history = computeLoss(Y0,Y,A1,A2)
+        if(!is.null(A1.star)&&!is.null(A2.star)){
+          error_history = get_error(A1,A2,A1.star,A2.star)$absolute
+        } else {
+          error_history = NULL
+        }
+      } else {
+        loss_history = NULL
+        error_history = NULL
+      }
+      p1 <- nrow(A1)
+      p2 <- nrow(A2)
+      t <- length(Y)
+      while ((rate > r_limit) & (co < it_lmt)) {
+        # print(co)
+        co <- co + 1
+        A1_l <- A1
+        A2_l <- A2
+        
+        # A1
+        CR <- cbind(C1, R1)
+        CP <- cbind(C1, P1)
+        A1 <- CR %*% D1 %*% t(CP)
+        # print(norm(A1 - A1_original, type = "F"))
+        D11 <- D1[seq_len(d1), seq_len(d1), drop = F]
+        D12 <- D1[seq_len(d1), seq_len(r1 - d1) + d1, drop = F]
+        D21 <- D1[seq_len(r1 - d1) + d1, seq_len(d1), drop = F]
+        D22 <- D1[seq_len(r1 - d1) + d1, seq_len(r1 - d1) + d1, drop = F]
+        
+        # partial derivative
+        dA <- (A1_l %*% Y0 %*% t(A2_l) - Y[[1]]) %*% A2_l %*% t(Y0)
+        for (j in 2:t) {
+          dA <- dA + (A1_l %*% Y[[j - 1]] %*% t(A2_l) - Y[[j]]) %*% A2_l %*% t(Y[[j - 1]]) 
+        }
+        dA <- dA / t
+        
+        fi_d <- phi
+        
+        co_d <- 4 * fi_d * (norm(A1_l, type = "F") - norm(A2_l, type = "F"))
+        
+        dC <- dA %*% (C1 %*% t(D11) + P1 %*% t(D12)) + t(dA) %*% (C1 %*% D11 + R1 %*% D21) 
+              + co_d * (A1_l %*% cbind(C1, P1) %*% rbind(t(D11), t(D12)) + t(A1_l) %*% cbind(C1, R1) %*% rbind(D11, D21))
+        dD <- t(CR) %*% dA %*% CP 
+              + co_d * t(cbind(C1, R1)) %*% A1_l %*% cbind(C1, P1)
+        dR <- dA %*% CP %*% t(D1[seq_len(r1 - d1) + d1, , drop = F]) 
+              + co_d * A1_l %*% cbind(C1, P1) %*% rbind(t(D21), t(D22))
+        dP <- t(dA) %*% CR %*% D1[ , seq_len(r1 - d1) + d1, drop = F]
+              + co_d * t(A1_l) %*% cbind(C1, R1) %*% rbind(D12, D22)
+        
+        # new values of C, R, P, D
+        C1_n <- C1 - eta * dC 
+        - eta * a * (2 * C1 %*% (t(C1) %*% C1 - b^2 * diag(d1)) + R1 %*% t(R1) %*% C1 + P1 %*% t(P1) %*% C1)
+        R1_n <- R1 - eta * dR 
+        - eta * a * (R1 %*% (t(R1) %*% R1 - b^2 * diag(r1 - d1)) + C1 %*% t(C1) %*% R1)
+        P1_n <- P1 - eta * dP
+        - eta * a * (P1 %*% (t(P1) %*% P1 - b^2 * diag(r1 - d1)) + C1 %*% t(C1) %*% P1)
+        D1_n <- D1 - eta * dD
+        # transfer
+        C1 <- C1_n
+        R1 <- R1_n
+        P1 <- P1_n
+        D1 <- D1_n
+        CR <- cbind(C1, R1)
+        CP <- cbind(C1, P1)
+        A1 <- CR %*% D1 %*% t(CP)
+      
+        
+        # A2
+        CR <- cbind(C2, R2)
+        CP <- cbind(C2, P2)
+        A2 <- CR %*% D2 %*% t(CP)
+        # print(norm(A2 - A2_original, type = "F"))
+        D11 <- D2[seq_len(d2), seq_len(d2), drop = F]
+        D12 <- D2[seq_len(d2), seq_len(r2 - d2) + d2, drop = F]
+        D21 <- D2[seq_len(r2 - d2) + d2, seq_len(d2), drop = F]
+        D22 <- D2[seq_len(r2 - d2) + d2, seq_len(r2 - d2) + d2, drop = F]
+        
+        # partial derivative
+        dA <- (A2_l %*% t(Y0) %*% t(A1_l) - t(Y[[1]])) %*% A1_l %*% Y0
+        for (j in 2:t) {
+          dA <- dA + (A2_l %*% t(Y[[j - 1]]) %*% t(A1_l) - t(Y[[j]])) %*% A1_l %*% Y[[j - 1]] 
+        }
+        dA <- dA / t
+        
+        dC <- dA %*% (C2 %*% t(D11) + P2 %*% t(D12)) + t(dA) %*% (C2 %*% D11 + R2 %*% D21)
+              - co_d * (A2_l %*% cbind(C2, P2) %*% rbind(t(D11), t(D12)) + t(A2) %*% cbind(C2, R2) %*% rbind(D11, D21))
+        dD <- t(CR) %*% dA %*% CP 
+              - co_d * t(cbind(C2, R2)) %*% A2_l %*% cbind(C2, P2)
+        dR <- dA %*% CP %*% t(D2[seq_len(r2 - d2) + d2, , drop = F]) 
+              - co_d * A2_l %*% cbind(C2, P2) %*% rbind(t(D21), t(D22))
+        dP <- t(dA) %*% CR %*% D2[ , seq_len(r2 - d2) + d2, drop = F] 
+              - co_d * t(A2_l) %*% cbind(C2, R2) %*% rbind(D12, D22)
+        
+        # new values of C, R, P, D
+        C2_n <- C2 - eta * dC 
+        - eta * a * (2 * C2 %*% (t(C2) %*% C2 - b^2 * diag(d2)) + R2 %*% t(R2) %*% C2 + P2 %*% t(P2) %*% C2)
+        R2_n <- R2 - eta * dR 
+        - eta * a * (R2 %*% (t(R2) %*% R2 - b^2 * diag(r2 - d2)) + C2 %*% t(C2) %*% R2)
+        P2_n <- P2 - eta * dP
+        - eta * a * (P2 %*% (t(P2) %*% P2 - b^2 * diag(r2 - d2)) + C2 %*% t(C2) %*% P2)
+        D2_n <- D2 - eta * dD
+        # transfer
+        C2 <- C2_n
+        R2 <- R2_n
+        P2 <- P2_n
+        D2 <- D2_n
+        CR <- cbind(C2, R2)
+        CP <- cbind(C2, P2)
+        A2 <- CR %*% D2 %*% t(CP)
+
+        diff <- norm(kronecker(A1, A2) - kronecker(A1_l, A2_l), type = "F")
+        rate <- diff / norm(kronecker(A1_l, A2_l), type = "F") * 100
+        
+        if(history) 
+          loss_history = c(loss_history, computeLoss(Y0,Y,A1,A2))
+          if(!is.null(A1.star)&&!is.null(A2.star)){
+            error_history = c(error_history,get_error(A1,A2,A1.star,A2.star)$absolute)
+          }
+      }
+      lastloss = computeLoss(Y0,Y,A1,A2)
+      if(!is.null(A1.star)&&!is.null(A2.star)){
+        lasterror = get_error(A1,A2,A1.star,A2.star)$absolute
+      } else {
+        lasterror = NaN
+      }
+      
+      if(display==T){
+        if(co>=it_lmt){
+          cat("\nMax iteration: ",
+              co,". Last change: ",
+              rate,"%. Loss: ",lastloss," Error: ",lasterror,". Params: ",
+              r1," ",d1," ",r2," ",d2,"\n",sep="")
+        } else {
+          cat("Converged. Iterations: ",
+              co,". Threshold: ",r_limit,"%. Loss: ",lastloss," Error: ",lasterror,
+              ". Params: ",r1," ",d1," ",r2," ",d2,"\n",sep="")
+        }
+      }
+      CR <- cbind(C1, R1)
+      CP <- cbind(C1, P1)
+      A1 <- CR %*% D1 %*% t(CP)
+      CR <- cbind(C2, R2)
+      CP <- cbind(C2, P2)
+      A2 <- CR %*% D2 %*% t(CP)
+      cat("------------------End of GD--------------------\n\n")
+      return(list("A1.hat"=A1, "C1.hat"=C1, "R1.hat"=R1, "P1.hat"=P1, "D1.hat"=D1,
+                  "A2.hat"=A2, "C2.hat"=C2, "R2.hat"=R2, "P2.hat"=P2, "D2.hat"=D2,
+                  "loss_history"=loss_history, "error_history"=error_history))
+}
+```
+
+```{R}
+GD_estimate <- function(Y0, Y, initials_list, r1, d1, r2, d2, 
+                        eta,r_limit,it_lmt,display=F,A1.star=NULL,A2.star=NULL){
+  tryCatch(GD_algo(Y0, Y, initials_list, r1, d1, r2, d2,
+                   eta = eta, r_limit = r_limit, it_lmt = it_lmt, 
+                   display = display),
+           error=tryCatch(function(e) {
+             GD_algo(Y0,Y,initials_list,r1,d1,r2,d2,
+                                              eta=eta/10,r_limit=r_limit/10,
+                                              it_lmt=it_lmt*5,display=display)
+             cat("eta:", eta, "diverges.")
+             },
+                          error = function(ee) {
+                                             print(ee)
+                                             return(ee)
+                                  }
+                          )
+            )
+}
+```
+
+
+#### Model Selection
+
+```{r}
+MAR_rank_selction <- function(A1, A2, t, r1_upp=8, r2_upp=8, coef=20, visualize=F){
+    p1 <- nrow(A1)
+    p2 <- nrow(A2)
+    d_ar1 <- svd(A1)$d[1:r1_upp]
+    min <- Inf
+    r1_hat <- 0
+    s1 <- sqrt((p1 + p2) * log(t) / (coef * t))
+    for (i in seq_len(r1_upp - 1)) {
+      q <- ((d_ar1[i + 1] + s1) / (d_ar1[i] + s1))
+      if (q < min) {
+        min <- q
+        r1_hat <- i
+      }
+    }
+    q1 <- (d_ar1[2:r1_upp]+s1)/(d_ar1[1:(r1_upp-1)]+s1)
+    r1.hat <- which.min(q1)
+    
+    d_ar2 <- svd(A2)$d[1:r2_upp]
+    min <- Inf
+    r2_hat <- 0
+    s2 <- sqrt((p1 + p2) * log(t) / (coef * t))
+    for (i in seq_len(r2_upp - 1)) {
+      q <- ((d_ar2[i + 1] + s2) / (d_ar2[i] + s2))
+      if (q < min) {
+        min <- q
+        r2_hat <- i
+      }
+    }
+    q2 <- (d_ar2[2:r2_upp]+s2)/(d_ar2[1:(r2_upp-1)]+s2)
+    r2.hat <- which.min(q2)
+    if(visualize==T){
+      plot(1:(r1_upp-1),q1,xlab="r1",ylab="ratio")
+      plot(1:(r1_upp-1),q2,xlab="r2",ylab="ratio")
+    }
+    r1 <- as.integer(r1_hat)
+    r2 <- as.integer(r2_hat)
+    return(list("r1"=r1,"r2"=r2))
+}
+
+MAR_commondim_selection <- function(Y0,Y,r1,r2,est.RRMAR,eta,r_limit,it_lmt,change_BICit=F,display=F){
+  # Select common dimension. Return selected values of d1 and d2, along with estimation in this case. 
+  # it_limit controls the maximum iteration in estimation the selected model, not including models trained in computing BIC.
+  bic_min <- Inf
+  d1_result <- -1
+  d2_result <- -1
+  t <- length(Y)
+  if (display==T) cat("4. Begin of commondim selection procedure, ranks:",r1,r2,"\n\n")
+
+  
+  for(d1 in 0:r1)
+    for(d2 in 0:r2){
+      if(display==T) cat("Now selecting: d1:",d1,"d2:",d2,"\n")
+      # estimate a MARwCF model with given r1,d1,r2,d2
+      if(change_BICit==T){
+        BIC_maxit <- it_lmt
+      } else {
+        BIC_maxit <- 2
+      }
+      initials.MARwCF <- initialCRPD_decompose(est.RRMAR$A1.hat,est.RRMAR$A2.hat,
+                                               r1,d1,r2,d2)
+      est.MARwCF <- GD_algo(Y0,Y,initials.MARwCF,r1,d1,r2,d2,
+                            eta=eta,r_limit=r_limit,it_lmt = BIC_maxit,display=display)
+      A1 <- est.MARwCF$A1.hat
+      A2 <- est.MARwCF$A2.hat
+      
+      # compute loss and BIC
+      loss <- 0
+      for (i in (2:t)) {
+        loss <- loss + norm(Y[[i]] - A1 %*% Y[[i - 1]] %*% t(A2), type = "F")^2
+      }
+      bic <- 0
+      p1 <- nrow(Y0)
+      p2 <- ncol(Y0)
+      dcs1 <- r1 * (2 * p1 - r1) - d1 * (p1 - (d1 + 1) / 2)
+      dcs2 <- r2 * (2 * p2 - r2) - d2 * (p2 - (d2 + 1) / 2)
+      bic <- t * p1 * p2 * log(loss) + (dcs1 + dcs2 - 1) * log(t)
+      
+      # find the minimal BIC
+      if (bic < bic_min){
+        bic_min <- bic
+        d1_result <- d1
+        d2_result <- d2
+      }
+    }
+  return(c("d1"=as.integer(d1_result),"d2"=as.integer(d2_result)))
+}
+```
+
+### Computing Error
+
+```{r}
+get_error <- function(A1.hat, A2.hat, A1.star, A2.star){
+  relative <- norm(kronecker(A1.hat,A2.hat)-kronecker(A1.star,A2.star),type="F")/norm(kronecker(A1.star,A2.star),type="F")
+  absolute <- norm(kronecker(A1.hat,A2.hat)-kronecker(A1.star,A2.star),type="F")
+  return(list("relative"=relative,"absolute"=absolute))
+}
+
+computeLoss = function(Y0, Y, A1, A2){
+  loss = norm(Y[[1]]-A1%*%Y0%*%t(A2))^2
+  for(i in 2:length(Y)) loss = loss + norm(Y[[i]]-A1%*%Y[[i-1]]%*%t(A2))^2
+  return(loss/length(Y)/2)
+}
+
+
+get_spacedist <- function(U, V, Us, Vs){
+  if(ncol(U)==0){
+    dist1 <- NA
+  } else {
+    cosU <- svd(t(U)%*%Us)$d
+    dist.U <- sqrt(sum(sin(acos(cosU))^2))
+    dist1 <- norm(U%*%solve(t(U)%*%U,t(U))-Us%*%t(Us),type="F")
+  }
+  if(ncol(V)==0){
+    dist2 <- NA
+  } else {
+    cosV <- svd(t(V)%*%Vs)$d
+    dist.V <- sqrt(sum(sin(acos(cosV))^2))
+    dist2 <- norm(V%*%solve(t(V)%*%V,t(V))-Vs%*%t(Vs),type="F")
+  }
+  return(c("Loading1"=dist1,"Loading2"=dist2))
+}
+```
+
+### A whole simulation procedure for simulation 1
+
+```{r}
+simulation1_once <- function(p1,r1s,d1s,p2,r2s,d2s,t,
+                             optim.params=c(0.001,0.1,1000,
+                                            0.001,0.1,1000,
+                                            F),
+                             r1_upp=8,r2_upp=8,display=F){
+  # ----main function: the whole procedure of estimation with rank and common dimension selection----
+  # optim.params=c(eta.GD,r.GD,it.GD,eta.BIC,r.BIC,it.BIC,change_BICit)
+  eta.GD=optim.params[1]
+  r.GD=optim.params[2]
+  it.GD=optim.params[3]
+  eta.BIC=optim.params[4]
+  r.BIC=optim.params[5]
+  it.BIC=optim.params[6]
+  change_BICit=optim.params[7]
+  
+  timestart <- Sys.time()
+  
+  my.data <- generation_MARwCF(p1, r1s, d1s, p2, r2s, d2s, t)
+  Y <- my.data$Y
+  Y0 <- my.data$Y0
+  
+  # assign("my.data", my.data, envir = .GlobalEnv) 
+  # step 1: train an oMAR model
+  est.oMAR <- initial1_ordinaryMAR(Y,Y0)
+  
+  if (display) {
+    cat("1. Training oMAR model takes:", Sys.time() - timestart, "\n")
+  }
+  
+  # step 2: train a RRMAR model with r1=r1_upp, r2=r2_upp
+  if (display==T) cat("2. Start rank selection procedure\n")
+  initials.RRMAR1 <- initialRPD_RRMAR(est.oMAR$A1.hat,est.oMAR$A2.hat,r1_upp,r2_upp)
+  est.RRMAR1 <- GD_estimate(Y0,Y,initials.RRMAR1,r1_upp,0,r2_upp,0,
+                            eta = eta.GD,r_limit = r.GD,it_lmt = it.GD,
+                            display = display)
+  
+  if (display) {
+    cat("The training of oMAR model + RRMAR with r_upp takes:", Sys.time() - timestart, "\n")
+  }
+    
+  # step 3: rank selection
+  ranks <- MAR_rank_selction(est.RRMAR1$A1.hat,est.RRMAR1$A2.hat,t=length(Y),r1_upp,r2_upp,visualize=F)
+  r1 <- ranks$r1
+  r2 <- ranks$r2
+  
+  # step 4: train a RRMAR model with selected ranks
+  if (display==T) cat("3. Start training RRMAR model with the r1 = ", r1, " r2 = ", r2, "\n")
+  
+  initials.RRMAR2 <- initialRPD_RRMAR(est.oMAR$A1.hat,est.oMAR$A2.hat,r1,r2)
+  est.RRMAR2 <- GD_estimate(Y0,Y,initials.RRMAR2,r1,0,r2,0,
+                            eta = eta.GD,r_limit = r.GD,it_lmt = it.GD,
+                            display = display)
+  
+  if (display) {
+    cat("The training of oMAR model + RRMAR takes:", Sys.time() - timestart, "\n")
+  }
+  
+  # step 5: common dimension selection
+  dim.select.result <- MAR_commondim_selection(Y0,Y,r1,r2,est.RRMAR2,
+                                               eta=eta.BIC,r_limit=r.BIC,it_lmt=it.BIC,
+                                               change_BICit=change_BICit,display=display)
+  d1 <- dim.select.result[1]
+  d2 <- dim.select.result[2]
+  
+  # step6: train the final model
+  if(display==T) print("Training the final model...")
+  initials.MARwCF <- initialCRPD_decompose(est.RRMAR2$A1.hat,est.RRMAR2$A2.hat,
+                                           r1,d1,r2,d2)
+  est.MARwCF <- GD_estimate(Y0,Y,initials.MARwCF,r1,d1,r2,d2,
+                            eta = eta.GD,r_limit = r.GD,it_lmt = it.GD,
+                            display=display)
+
+  # step7: compute error
+  A1.hat <- est.MARwCF$A1.hat
+  A2.hat <- est.MARwCF$A2.hat
+  if(r1==r1s&&r2==r2s&&d1==d1s&&d2==d2s){
+    correct <- TRUE
+    } else {
+    correct <- FALSE
+    }
+  
+  e1=get_error(est.oMAR$A1.hat,est.oMAR$A2.hat,my.data$A1.star,my.data$A2.star)$relative
+  e2=get_error(est.RRMAR2$A1.hat,est.RRMAR2$A2.hat,my.data$A1.star,my.data$A2.star)$relative
+  e3=get_error(A1.hat,A2.hat,my.data$A1.star,my.data$A2.star)$relative
+  to_return <- c(r1,d1,r2,d2,correct,e1,e2,e3)
+  names(to_return) <- c("r1_hat","d1_hat","r2_hat","d2_hat","is_correct","error1","error2","error3")
+  
+  if (display) {
+    cat("The whole process takes:", Sys.time() - timestart, "\n")
+  }
+  
+  return(to_return)
+}
+```
+
+# A whole procedure for simulation2
+
+```{r}
+simulation2_once <- function(p1, r1s, p2, r2s, t, Sigma=diag(p1*p2),
+                             optim.params=c(0.01,0.1,1000,
+                                            0.01,0.1,1000,
+                                            F),
+                             r1_upp=8, r2_upp=8, display=F){
+  library(tensorTS)
+  eta.GD=optim.params[1]
+  r.GD=optim.params[2]
+  it.GD=optim.params[3]
+  eta.BIC=optim.params[4]
+  r.BIC=optim.params[5]
+  it.BIC=optim.params[6]
+  change_BICit=optim.params[7]
+  
+  
+  
+  my.data <- generation_DMFM2(p1,r1s,p2,r2s,t,Sigma)
+  
+  #assign("my.data",my.data,envir= .GlobalEnv)
+  
+  Y <- my.data$Y
+  Y0 <- my.data$Y0
+  
+  # data for tensor FM
+  data <- array(NA,dim=c(t+1,p1,p2))
+  data[1,,] <- my.data$Y0
+  for(i in 2:(t+1)) data[i,,] <- my.data$Y[[i-1]]
+  tenTS.est <- tenFM.est(data,r=c(r1s,r2s))
+  
+  tenTS.rank <- tenFM.rank(data)$factor.num
+  tenTS.est2 <- tenFM.est(data,r=tenTS.rank)
+  
+  
+  
+  # select r and d
+  # step 1: train an oMAR model
+  est.oMAR <- initial1_ordinaryMAR(Y,Y0)
+  # step 2: train a RRMAR model with r1=r1_upp, r2=r2_upp
+  initials.RRMAR1 <- initialRPD_RRMAR(est.oMAR$A1.hat,est.oMAR$A2.hat,r1_upp,r2_upp)
+  est.RRMAR1 <- GD_estimate(Y0,Y,initials.RRMAR1,r1_upp,0,r2_upp,0,
+                            eta = eta.GD,r_limit = r.GD,it_lmt = it.GD,display = display)
+  # step 3: rank selection
+  ranks <- MAR_rank_selction(est.RRMAR1$A1.hat,est.RRMAR1$A2.hat,t=length(Y),r1_upp,r2_upp,visualize=F)
+  r1 <- ranks$r1
+  r2 <- ranks$r2
+  # step 4: train a RRMAR model with selected ranks
+  initials.RRMAR2 <- initialRPD_RRMAR(est.oMAR$A1.hat,est.oMAR$A2.hat,r1,r2)
+  est.RRMAR2 <- GD_estimate(Y0,Y,initials.RRMAR2,r1,0,r2,0,
+                            eta = eta.GD,r_limit = r.GD,it_lmt = it.GD,display=display)
+  # step 5: common dimension selection
+  dim.select.result <- MAR_commondim_selection(Y0,Y,r1,r2,est.RRMAR2,
+                                               eta=eta.BIC,r_limit=r.BIC,it_lmt=it.BIC,
+                                               change_BICit=change_BICit,display=F)
+  d1 <- dim.select.result[1]
+  d2 <- dim.select.result[2]
+  # step6: train the final model
+  if(display==T) print("Training the final model...")
+  initials.MARwCF <- initialCRPD_decompose(est.RRMAR2$A1.hat,est.RRMAR2$A2.hat,
+                                           r1,d1,r2,d2)
+  est.MARwCF <- GD_estimate(Y0,Y,initials.MARwCF,r1,d1,r2,d2,
+                            eta = eta.GD,r_limit = 0.5*r.GD,it_lmt = 2*it.GD,
+                            display=display)
+  if(r1==d1&&r2==d2&&d1==r1s&&d2==r2s){
+    correct <- TRUE
+    } else {
+    correct <- FALSE
+    }
+  
+  
+  error1 <- get_spacedist(tenTS.est$Q[[1]],tenTS.est$Q[[2]],my.data$L1.star,my.data$L2.star)
+  error2 <- get_spacedist(tenTS.est2$Q[[1]],tenTS.est2$Q[[2]],my.data$L1.star,my.data$L2.star)
+  error3 <- get_spacedist(est.MARwCF$C1.hat,est.MARwCF$C2.hat,my.data$L1.star,my.data$L2.star)
+  
+  to_return <- c(r1,d1,r2,d2,correct,tenTS.rank,error1,error2,error3)
+  names(to_return) <- c("r1","d1","r2","d2","correct","TS_rank1","TS_rank2","L1_TStrue","L2_TStrue","L1_TSfalse","L2_TSfalse","L1_MARwCF","L2_MARwCF")
+  return(to_return)
+}
+```
